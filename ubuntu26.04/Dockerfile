@@ -1,5 +1,4 @@
-# Build a reusable Ubuntu image with GNU Fortran toolchains, CMake, and
-# repository BLAS/LAPACK for compiling and testing Fortran projects.
+# Build a reusable image with GNU/Intel Fortran and reference/Intel BLAS/LAPACK.
 
 ARG UBUNTU_IMAGE=ubuntu:26.04
 FROM ${UBUNTU_IMAGE}
@@ -17,9 +16,27 @@ RUN set -eu; \
         compilers="${compilers} gcc-${version} gfortran-${version}"; \
     done; \
     apt-get install -y --no-install-recommends \
-        build-essential ca-certificates cmake git gfortran ninja-build pkg-config \
+        build-essential ca-certificates cmake curl git gnupg gfortran ninja-build pkg-config \
         libblas-dev liblapack-dev ${compilers}; \
     rm -rf /var/lib/apt/lists/*
+
+# Select release series independently; APT resolves available patch versions.
+ARG IFX_VERSION=2026.2
+ARG MKL_VERSION=2026.2
+RUN set -eu; \
+    curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+        -o /tmp/oneapi-key.asc; \
+    gpg --batch --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg /tmp/oneapi-key.asc; \
+    rm /tmp/oneapi-key.asc; \
+    printf '%s\n' 'deb [arch=amd64 signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main' \
+        > /etc/apt/sources.list.d/oneapi.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        "intel-oneapi-compiler-fortran-${IFX_VERSION}" \
+        "intel-oneapi-mkl-classic-devel-${MKL_VERSION}"; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --chmod=755 with-oneapi.sh /usr/local/bin/with-oneapi
 
 # Record resolved versions so CI artifacts can identify the toolchain precisely.
 RUN mkdir -p /opt/fortran-ci; \
@@ -28,6 +45,7 @@ RUN mkdir -p /opt/fortran-ci; \
 
 # Bound thread counts and build parallelism; jobs can override these variables.
 ENV OMP_NUM_THREADS=2 \
+    MKL_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1 \
     CMAKE_BUILD_PARALLEL_LEVEL=4
 WORKDIR /work
