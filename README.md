@@ -81,3 +81,74 @@ Verified Ubuntu 26.04 amd64 compiler packages:
 | 14 | 14.3.0-14ubuntu1 |
 | 15 | 15.2.0-16ubuntu1 |
 | 16 | 16-20260322-1ubuntu1 |
+
+## Podman setup on Fedora
+
+To use rootless Podman as a drop-in replacement for Docker on Fedora with a
+custom storage location:
+
+### 1. Storage directory and SELinux setup
+
+Define the environment variables for your shell:
+
+#### Bash
+
+```bash
+CONTAINER_USER="username"
+CONTAINER_GROUP="groupname"
+STORAGE_BASE="/containers/podman"
+```
+
+#### Fish
+
+```fish
+set CONTAINER_USER username
+set CONTAINER_GROUP groupname
+set STORAGE_BASE /containers/podman
+```
+
+Install packages and initialize storage permissions:
+
+```sh
+# Install Podman and Docker CLI wrapper
+sudo dnf install -y podman podman-docker
+
+# Create storage directory with restricted user access
+sudo mkdir -p "$STORAGE_BASE/$CONTAINER_USER"
+sudo chown root:root "$STORAGE_BASE"
+sudo chmod 755 "$STORAGE_BASE"
+sudo chown "$CONTAINER_USER:$CONTAINER_GROUP" "$STORAGE_BASE/$CONTAINER_USER"
+sudo chmod 700 "$STORAGE_BASE/$CONTAINER_USER"
+
+# Set SELinux file context for container storage
+sudo semanage fcontext -a -t container_var_lib_t "$STORAGE_BASE(/.*)?"
+sudo restorecon -R -v "$STORAGE_BASE"
+```
+
+### 2. Configuration files
+
+In `~/.config/containers/storage.conf`, configure the custom storage path
+(replace `<UID>` and `<username>`):
+
+```toml
+[storage]
+driver = "overlay"
+runroot = "/run/user/<UID>/containers"
+graphroot = "/containers/podman/<username>"
+```
+
+In `~/.config/containers/containers.conf`, enable `keep-id` user namespace
+mapping by default so `--user "$(id -u):$(id -g)"` works without command changes:
+
+```toml
+[containers]
+userns = "keep-id"
+```
+
+### 3. Verification
+
+Verify the active storage root:
+
+```sh
+podman info --format '{{.Store.GraphRoot}}'
+```
